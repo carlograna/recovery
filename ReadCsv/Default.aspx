@@ -11,7 +11,8 @@
     <asp:FileUpload runat="server" ID="fileUpload" />
 
     <asp:Button runat="server" ID="btnUpload" Text="Upload File" OnClick="btnUpload_Click" />
-    <asp:Label runat="server" ID="lblMessage" Text="" />
+    <asp:Label runat="server" ID="lblHeader" Text="" />
+    <asp:Label runat="server" ID="lblTrans" Text="" />
 
     <div class="row">
         <div class="col-md-4">

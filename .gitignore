@@ -2,3 +2,9 @@
 packages/*
 ReadCsv/bin/*
 ReadCsv/obj/*
+ReadCsv/ItemModel.*
+ReadCsv/Batch.cs
+ReadCsv/BatchDataEntry.cs
+ReadCsv/Checks.cs
+ReadCsv/ChecksDataEntry.cs
+ReadCsv/Transactions.cs
