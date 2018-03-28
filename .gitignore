@@ -8,3 +8,5 @@ ReadCsv/BatchDataEntry.cs
 ReadCsv/Checks.cs
 ReadCsv/ChecksDataEntry.cs
 ReadCsv/Transactions.cs
+ReadCsv/App_Start/*
+			

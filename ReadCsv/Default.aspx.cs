@@ -9,8 +9,24 @@ using System.Xml.Linq;
 
 namespace ReadCsv
 {
+    public class BankTran
+    {
+        public string UserID { get; set; }
+        public string AmountDue { get; set; }
+        public string PaymentAmount { get; set; }
+        public string DueDate { get; set; }
+        public string ArpID { get; set; }
+        public string RecoveryPaymentType { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+    }
     public partial class _Default : Page
     {
+        protected delegate bool PaymentHandler(string pmtType);
+
+        //static bool IsMisappliedPmt(string pmtType) { return pmtType == "OVP"; }
+        //static bool IsReturnedPmt(string pmtType) { return pmtType == "BRI_ACH" || pmtType == "BRI_CHK"; }
+
         protected void Page_Load(object sender, EventArgs e)
         {
 
@@ -22,7 +38,7 @@ namespace ReadCsv
 
             //if (fileUpload.HasFile)
             //{
-            //    savePath += fileUpload.FileName;
+            //    savePath += fileUpload.FileName;  
             //    fileUpload.SaveAs(savePath);
             //}
 
@@ -41,14 +57,14 @@ namespace ReadCsv
                 from h in xml.Root.Descendants("Header")
                 select new
                 {
-                    VersionNumber = h.Element("VersionNumber").Value
-                    ,BillerGroupID = h.Element("BillerGroupID").Value
-                    ,BillerGroupShortName = h.Element("BillerGroupShortName").Value
-                    ,BillerID = h.Element("BillerID").Value
-                    ,BillerShortName = h.Element("BillerShortName").Value
-                    ,FileIndicator = h.Element("FileIndicator").Value
-                    ,ProcessDate = h.Element("ProcessDate").Value
-                    ,BillerReportName = h.Element("BillerReportName").Value
+                    VersionNumber = h.Element("VersionNumber").Value,
+                    BillerGroupID = h.Element("BillerGroupID").Value,
+                    BillerGroupShortName = h.Element("BillerGroupShortName").Value,
+                    BillerID = h.Element("BillerID").Value,
+                    BillerShortName = h.Element("BillerShortName").Value,
+                    FileIndicator = h.Element("FileIndicator").Value,
+                    ProcessDate = h.Element("ProcessDate").Value,
+                    BillerReportName = h.Element("BillerReportName").Value
                 }
                 ).SingleOrDefault();
 
@@ -65,168 +81,270 @@ namespace ReadCsv
             // Query the data and write out a subset of contacts
             #region TRANSACTIONS
             var transactions = from c in xml.Root.Descendants("TransactionDetail")
-                            //where (int)c.Attribute("id") < 4
-                                select new
-                                {
-                                    UserID = c.Element("UserId").Value,
-                                    AmountDue = c.Element("AmountDue").Value,
-                                    PaymentAmount = c.Element("PaymentAmount").Value,
-                                    DueDate = c.Element("DueDate").Value,
-                                    Parameter = c.Descendants("Parameter")
-                                };
+                                   //where (int)c.Attribute("id") < 4
+                               select new
+                               {
+                                   UserID = c.Element("UserId").Value,
+                                   AmountDue = c.Element("AmountDue").Value,
+                                   PaymentAmount = c.Element("PaymentAmount").Value,
+                                   DueDate = c.Element("DueDate").Value,
+                                   Parameter = c.Descendants("Parameter"),
+                                   FirstName = c.Descendants("FirstName"),
+                                   LastName = c.Descendants("LastName")
+                               };
 
-            foreach (var tran in transactions)
-            {
-                foreach (var par in tran.Parameter)
-                {
-                    lblTrans.Text += "<br/>" + par.Element("Name").Value + ", " + par.Element("Value").Value;
-                }
+            IEnumerable<BankTran> bankTrans = BankTrans(transactions);
 
-                lblTrans.Text += String.Format("<br/>Transaction: {0}, {1}, {2}, {3}", tran.UserID, tran.AmountDue, tran.PaymentAmount, tran.DueDate);
-            }
+            //IEnumerable<BankTran> listOVP = FilterTransactions(new PaymentHandler(IsMisappliedPmt), BankTrans);
+            //IEnumerable<BankTran> listBRI = FilterTransactions(new PaymentHandler(IsReturnedPmt), BankTrans);
+            IEnumerable<BankTran> overpaidTrans = FilterTransactions(s => s == "OVP", bankTrans);
+            IEnumerable<BankTran> briTrans = FilterTransactions(s => s == "BRI_CHK" || s == "BRI_ACH", bankTrans);
+
+            List<IEnumerable<BankTran>> list = new List<IEnumerable<BankTran>>();
+
+            list.Add(overpaidTrans);
+            list.Add(briTrans);
+
+            CreateTransOnDB(list);
             #endregion
 
-            #region SUMMARY
+            #region  CheckTotal
+
+            // Summary totals
             var summary = from t in xml.Root.Descendants("PaymentStatusSummary")
-                          //where (string)t.Attribute("type") == "SENT"
+                              //where (string)t.Attribute("type") == "SENT"
                           select new
                           {
                               TotalAmount = t.Element("TotalAmount").Value
                           };
 
-            double totalAmt = 0;
-            foreach(var sum in summary)
+            double totalSummaryAmt = 0;
+            foreach (var sum in summary)
             {
                 lblTrans.Text += "<br/> total: " + sum.TotalAmount;
-                totalAmt += double.Parse(sum.TotalAmount);
+                totalSummaryAmt += double.Parse(sum.TotalAmount);
             }
-            #endregion
 
+            // Transaction totals
+            double totalTranAmt = 0;
+            foreach (var subList in list)
+            {
+                foreach (var tran in subList)
+                {
+                    lblTrans.Text += String.Format("<br/>{0} Transaction: {1}, {2}, {3}, {4}, {5}", tran.RecoveryPaymentType, tran.UserID, tran.AmountDue, tran.PaymentAmount, tran.DueDate, tran.ArpID);
+                    totalTranAmt += Convert.ToDouble(tran.PaymentAmount);
+                }
+            }
+
+
+            // Checking totals
+            if (totalTranAmt == totalSummaryAmt)
+                lblMsg.Text = "Total transaction and summary amount match.";
+            else
+                lblMsg.Text = "Total transaction and summary amounts DO NOT match.";
+            #endregion
+            
+        }
+
+        private void CreateTransOnDB(List<IEnumerable<BankTran>> List)
+        {
+            try
+            {
+                using (ItemDBContext dbContext = new ItemDBContext())
+                {
+                    foreach (var subList in List)
+                    {
+                        Batch batch = CreateBatch(subList);
+                        BatchDataEntry bde = CreateBatchDataEntry(batch.GlobalBatchID);
+
+                        IEnumerable<Checks> checks = CreateChecks(subList, batch);
+                        IEnumerable<ChecksDataEntry> checksDE = CreateChecksDataEntry(checks, batch, subList.ToList());
+                        IEnumerable<Transactions> trans = CreateTransactions(checks, batch);
+
+
+                        dbContext.Batch.Add(batch);
+                        dbContext.BatchDataEntry.Add(bde);
+
+                        foreach (var tran in trans)
+                        {
+                            dbContext.Transactions.Add(tran);
+                        }
+
+                        foreach (var check in checks)
+                        {
+                            dbContext.Checks.Add(check);
+                        }
+
+                        foreach (var cde in checksDE)
+                        {
+                            dbContext.ChecksDataEntry.Add(cde);
+                        }
+
+                        //lblTrans.Text = dbContext.Database.Log.ToString();
+                    }
+                    dbContext.SaveChanges();
+                }
+            }
+            catch
+            {
+                throw;
+            }
+        }
+
+        private Batch CreateBatch(IEnumerable<BankTran> bankTrans)
+        {
             int globalBatchID;
 
-            using(var dbContext = new ItemDBContext())
+            using (var dbContext = new ItemDBContext())
             {
                 // Key is equal to the current max value plus one
                 globalBatchID = dbContext.Batch.Max(b => b.GlobalBatchID) + 1;
             }
 
+            double amount;
+            double totalAmt = 0;
+            foreach (var tran in bankTrans)
+            {
+                if (double.TryParse(tran.PaymentAmount, out amount))
+                {
+                    totalAmt += amount;
+                }
+                else throw new Exception("Unable to parse transaction amount: " + tran.PaymentAmount);
+            }
+
             DateTime curDate = DateTime.Now;
             Batch batch = new Batch()
             {
-                GlobalBatchID = globalBatchID
-                , BankID = 7
-                , LockboxID = 306
-                , DESetupID = null
-                , ProcessingDate = curDate.Date
-                , BatchID = 203
-                , DepositStatus = 850
-                , BatchCueID = 0 // ???
-                , CutOffStatus = 0
-                , BatchMode = null
-                , SystemType = 0
-                , Priority = 1
-                , PrintLabels = 1
-                , BatchTypeCode = 50 // ???
-                , BatchTypeSubCode = 0
-                , BatchTypeText = null
-                , ConsolidationStatus = 0
-                , CARStatus = null
-                , KFIStatus = null
-                , FAXStatus = null
-                , FloatAssignmentStatus = 0
-                , ScanStatus = 21
-                , DEStatus = 0
-                , ExtractSequenceNumber = 0
-                , ImageExtractSequenceNumber = null
-                , DepositDate = curDate.Date
-                , CheckCount = transactions.Count()
-                , CheckAmount = (decimal) totalAmt
-                , StubCount = transactions.Count()
-                , StubAmount = (decimal) totalAmt
-                , CreationDate = curDate
-                , BillingTC = 0
-                , BillingRT = 0
-                , BillingAccount = 0
-                , BillingSerial = 0
-                , WorkgroupID = 1
-                , CurrencyCode = null
-                , MICRVerifyStatus = 4
-                , DEPrinted = null
-                , Is2Pass = 1
-                , UseCar = 1
-                , NoChecksEnclosed = 0
-                , Rejects = 0
-                , DepositTicketPrinted = false
-                , DateLastUpdated = curDate
-                , TransportID = null
-                , TrayID = null
-                , SubTrayID = null
-                , UseCustomer = 0
-                , DepositDDA = null
-                , EncodeComplete = null
-                , SplitsEnded = false
-                , SiteCode = null
-                , BitonalImageRemovalDate = null // ist seems this removal dates are a 1 1/2 month later
-                , DataRemovalDate = null
-                , ModificationDate = curDate
-                , TransportBatchID = null
-                , GrayScaleImageRemovalDate = null
-                , ColorImageRemovalDate = null
-                , CWDBDataRemovalDate = null
-                , CWDBBitonalImageRemovalDate = null
-                , CWDBGrayScaleImageRemovalDate = null
-                , CWDBColorImageRemovalDate = null
-                , BatchName = null
-                , BatchTypeID = Guid.NewGuid()
-                ,DecisionStatus = 0
-                ,AllowDecisioning = false
-                ,RequireDEBeforeTwoPass = false
-                ,OriginalGlobalBatchID = null
-                ,BatchExtractID = null
-                ,IsImageExchange = false
-                ,CaptureSiteCodeID = 10
-                ,BatchSourceKey = 1
-                ,NumOLDDaysRolled = 0
+                GlobalBatchID = globalBatchID,
+                BankID = 7,
+                LockboxID = bankTrans.Any(x => x.RecoveryPaymentType == "OVP")? 306 : 316, // overpaid batch or BRI batch
+                DESetupID = null,
+                ProcessingDate = curDate.Date,
+                BatchID = 203,
+                DepositStatus = 850,
+                BatchCueID = 0,// ???,
+                CutOffStatus = 0,
+                BatchMode = null,
+                SystemType = 0,
+                Priority = 1,
+                PrintLabels = 1,
+                BatchTypeCode = 50, // ???,
+                BatchTypeSubCode = 0,
+                BatchTypeText = null,
+                ConsolidationStatus = 0,
+                CARStatus = null,
+                KFIStatus = null,
+                FAXStatus = null,
+                FloatAssignmentStatus = 0,
+                ScanStatus = 21,
+                DEStatus = 0,
+                ExtractSequenceNumber = 0,
+                ImageExtractSequenceNumber = null,
+                DepositDate = curDate.Date,
+                CheckCount = bankTrans.Count(),
+                CheckAmount = (decimal)totalAmt,
+                StubCount = bankTrans.Count(),
+                StubAmount = (decimal)totalAmt,
+                CreationDate = curDate,
+                BillingTC = 0,
+                BillingRT = 0,
+                BillingAccount = 0,
+                BillingSerial = 0,
+                WorkgroupID = 1,
+                CurrencyCode = null,
+                MICRVerifyStatus = 4,
+                DEPrinted = null,
+                Is2Pass = 1,
+                UseCar = 1,
+                NoChecksEnclosed = 0,
+                Rejects = 0,
+                DepositTicketPrinted = false,
+                DateLastUpdated = curDate,
+                TransportID = null,
+                TrayID = null,
+                SubTrayID = null,
+                UseCustomer = 0,
+                DepositDDA = null,
+                EncodeComplete = null,
+                SplitsEnded = false,
+                SiteCode = null,
+                BitonalImageRemovalDate = null, // ist seems this removal dates are a 1 1/2 month later,
+                DataRemovalDate = null,
+                ModificationDate = curDate,
+                TransportBatchID = null,
+                GrayScaleImageRemovalDate = null,
+                ColorImageRemovalDate = null,
+                CWDBDataRemovalDate = null,
+                CWDBBitonalImageRemovalDate = null,
+                CWDBGrayScaleImageRemovalDate = null,
+                CWDBColorImageRemovalDate = null,
+                BatchName = null,
+                BatchTypeID = Guid.NewGuid(),
+                DecisionStatus = 0,
+                AllowDecisioning = false,
+                RequireDEBeforeTwoPass = false,
+                OriginalGlobalBatchID = null,
+                BatchExtractID = null,
+                IsImageExchange = false,
+                CaptureSiteCodeID = 10,
+                BatchSourceKey = 1,
+                NumOLDDaysRolled = 0,
             };
-
-            BatchDataEntry bde = new BatchDataEntry() {
-                GlobalBatchID = globalBatchID
-                ,ChecksStorageBoxNumber = null
-                ,DocumentsStorageBoxNumber = null
-                ,IronMountainBoxNumber = null
-            };
-
-            IEnumerable<Checks> checks = GetChecks(transactions, batch);
-            IEnumerable<ChecksDataEntry> checksDE = GetChecksDataEntry(checks, batch);
-            IEnumerable<Transactions> trans = GetTransactions(checks, batch);
-
-            using (ItemDBContext dbContext = new ItemDBContext())
+            return batch;
+        }
+        private BatchDataEntry CreateBatchDataEntry(int globalBatchID)
+        {
+            BatchDataEntry bde = new BatchDataEntry()
             {
-                dbContext.Batch.Add(batch);
-                dbContext.BatchDataEntry.Add(bde);
+                GlobalBatchID = globalBatchID,
+                ChecksStorageBoxNumber = null,
+                DocumentsStorageBoxNumber = null,
+                IronMountainBoxNumber = null
+            };
 
-                foreach (var tran in trans)
+            return bde;
+        }
+
+        private IEnumerable<BankTran> FilterTransactions(PaymentHandler filter, IEnumerable<BankTran> trans)
+        {
+            foreach (var item in trans)
+            {
+                if (filter(item.RecoveryPaymentType))
                 {
-                    dbContext.Transactions.Add(tran);
+                    yield return item;
                 }
-
-                foreach (var check in checks)
-                {
-                    dbContext.Checks.Add(check);
-                }
-
-                foreach(var cde in checksDE)
-                {
-                    dbContext.ChecksDataEntry.Add(cde);
-                }
-
-                //lblTrans.Text = dbContext.Database.Log.ToString();
-                dbContext.SaveChanges();
-                lblTrans.Text = batch.ToString();
             }
         }
 
-        private IEnumerable<Transactions> GetTransactions(IEnumerable<Checks> checks, Batch batch)
+        private IEnumerable<BankTran> BankTrans(IEnumerable<dynamic> transactions)
+        {
+            foreach (var tran in transactions)
+            {
+                BankTran bankTran = new BankTran()
+                {
+                    UserID = tran.UserID,
+                    AmountDue = tran.AmountDue,
+                    PaymentAmount = tran.PaymentAmount,
+                    DueDate = tran.DueDate,
+                    FirstName = tran.FirstName,
+                    LastName = tran.LastName
+                };
+
+
+                foreach (var par in tran.Parameter)
+                {
+                    if (par.Element("Name").Value == "arpID")
+                        bankTran.ArpID = par.Element("Value").Value;
+
+                    if (par.Element("Name").Value == "recoveryPaymentType")
+                        bankTran.RecoveryPaymentType = par.Element("Value").Value;
+                }
+
+                yield return bankTran;
+            }
+        }
+
+        private IEnumerable<Transactions> CreateTransactions(IEnumerable<Checks> checks, Batch batch)
         {
             foreach (var check in checks)
             {
@@ -236,27 +354,12 @@ namespace ReadCsv
                     TransactionID = check.TransactionID,
                 };
                 yield return tran;
-             }
-        }
-
-        private IEnumerable<ChecksDataEntry> GetChecksDataEntry(IEnumerable<Checks> checks, Batch batch)
-        {
-            foreach( var check in checks)
-            {
-                ChecksDataEntry cde = new ChecksDataEntry()
-                {
-                    GlobalBatchID = batch.GlobalBatchID,
-                    GlobalCheckID = check.GlobalCheckID,
-                    TransactionID = check.TransactionID
-                };
-
-                yield return cde;
             }
         }
 
-        private IEnumerable<Checks> GetChecks(IEnumerable<dynamic> transactions, Batch batch)
+        private IEnumerable<Checks> CreateChecks(IEnumerable<BankTran> transactions, Batch batch)
         {
-            int globalCheckID = GetCheckID();
+            int globalCheckID = CreateCheckID();
 
             int i = 0;
             foreach (var tran in transactions)
@@ -276,14 +379,32 @@ namespace ReadCsv
                     Serial = null,
                     Account = null,
                     Amount = decimal.Parse(tran.PaymentAmount),
-                    KilledMethod = 6
+                    KilledMethod = 6,
+                    RemitterName = tran.FirstName + " " + tran.LastName
                 };
 
                 yield return check;
             }
         }
 
-        private static int GetCheckID()
+        private IEnumerable<ChecksDataEntry> CreateChecksDataEntry(IEnumerable<Checks> checks, Batch batch, IEnumerable<BankTran> transactions)
+        {
+            var checksAndTrans = checks.Zip(transactions, (check, tran) => new { Checks = check, BankTran = tran });
+            foreach (var ct in checksAndTrans)
+            {
+                ChecksDataEntry cde = new ChecksDataEntry()
+                {
+                    GlobalBatchID = batch.GlobalBatchID,
+                    GlobalCheckID = ct.Checks.GlobalCheckID,
+                    TransactionID = ct.Checks.TransactionID,
+                    EntityID = ct.BankTran.ArpID,                    
+                };
+
+                yield return cde;
+            }
+        }
+
+        private static int CreateCheckID()
         {
             try
             {
@@ -300,20 +421,6 @@ namespace ReadCsv
             {
                 throw;
             }
-        }
-
-        protected void ProcessCsv(string path)
-        {
-
-            using (StreamReader sr = new StreamReader(path))
-            {
-                string current_line;
-                while ((current_line = sr.ReadLine()) != null)
-                {
-                    lblTrans.Text += "<br/>" + current_line;
-                }
-            }
-
         }
     }
 }

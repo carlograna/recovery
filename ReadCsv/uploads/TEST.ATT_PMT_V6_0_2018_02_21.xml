@@ -35,7 +35,7 @@ xsi:schemaLocation="https://epayment.epymtservice.com https://epayment.epymtserv
                 </Parameter>
                 <Parameter>
                     <Name>recoveryPaymentType</Name>
-                    <Value>CHK</Value>
+                    <Value>BRI_CHK</Value>
                 </Parameter>
             </Paramters>
             <CardDetail>
@@ -144,7 +144,7 @@ xsi:schemaLocation="https://epayment.epymtservice.com https://epayment.epymtserv
                 </Parameter>
                 <Parameter>
                     <Name>recoveryPaymentType</Name>
-                    <Value>ACH</Value>
+                    <Value>BRI_ACH</Value>
                 </Parameter>
             </Paramters>
             <ACHDetail>
