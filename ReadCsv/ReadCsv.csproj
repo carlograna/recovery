@@ -220,6 +220,7 @@
     <Compile Include="BatchDataEntry.cs">
       <DependentUpon>ItemModel.tt</DependentUpon>
     </Compile>
+    <Compile Include="BatchFactory.cs" />
     <Compile Include="Checks.cs">
       <DependentUpon>ItemModel.tt</DependentUpon>
     </Compile>
