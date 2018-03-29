@@ -214,7 +214,7 @@ namespace ReadCsv
             {
                 GlobalBatchID = globalBatchID,
                 BankID = 7,
-                LockboxID = bankTrans.Any(x => x.RecoveryPaymentType == "OVP")? 306 : 316, // overpaid batch or BRI batch
+                LockboxID = bankTrans.Any(x => x.RecoveryPaymentType == "OVP")? 316 : 306, // overpaid batch or BRI batch
                 DESetupID = null,
                 ProcessingDate = curDate.Date,
                 BatchID = 203,
