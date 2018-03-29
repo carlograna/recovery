@@ -136,14 +136,12 @@ namespace ReadCsv
                 }
             }
 
-
             // Checking totals
             if (totalTranAmt == totalSummaryAmt)
                 lblMsg.Text = "Total transaction and summary amount match.";
             else
                 lblMsg.Text = "Total transaction and summary amounts DO NOT match.";
-            #endregion
-            
+            #endregion            
         }
 
         private void CreateTransOnDB(List<IEnumerable<BankTran>> List)
@@ -160,7 +158,6 @@ namespace ReadCsv
                         IEnumerable<Checks> checks = CreateChecks(subList, batch);
                         IEnumerable<ChecksDataEntry> checksDE = CreateChecksDataEntry(checks, batch, subList.ToList());
                         IEnumerable<Transactions> trans = CreateTransactions(checks, batch);
-
 
                         dbContext.Batch.Add(batch);
                         dbContext.BatchDataEntry.Add(bde);
